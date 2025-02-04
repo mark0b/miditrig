@@ -29,15 +29,15 @@
 #define TIM0_SEED (256-FULL_BIT_TICKS)
 
 volatile uint8_t serialInput;
-volatile bool serialDataReady = false;
 
 //Initialization Routine
 void initUART(void){
     // Disable USI
     USICR = 0;
     //Set Data input pin as input
-    DDRB |= 1 << DDB0;
-    //eanble pull up on data output pin
+    DDRB &= ~(1 << DDB0); // Low = input.
+    DDRB |= 1<<DDB5; // enble led pin output.
+    //enable pull up on data output pin
     PORTB |= 1 << PB0;
     //enable Pin change interrupt
     GIMSK |= 1 << PCIE; //Pin change interrupts
@@ -46,27 +46,31 @@ void initUART(void){
 
 //Pin change Interrupt to setup USI Data Load In
 ISR(PCINT0_vect){
-    // Plant initial timer seed
-    // cycles/bit= (8MHz/31250) = 256
-    // Seed = 256 - (cycles/bit *1/2) = 128
-    TCNT0 = INIT_TIM0_SEED;
-    // Start Timer0 with prescaler
-    TCCR0B |= 1<<CS00;
-    // Enable Timer0 overflow interrupt
-    TIMSK |= 1 << TOIE0;
-    // plant USI counter seed
-    // top value 16
-    // USI Seed = top vale - (start + data bits)
-    // USI Seed = 16 - (1+8) = 7
-    USISR |= 7;
-    // select 3 wire mode
-    USICR |= 1<<USIWM0;
-    // set USI Clock source to timer overflow
-    USICR |= 1<<USICS0;
+    if (!(PINB & 1<<PINB0)) { // only handle if pin changed low.
+        // Plant initial timer seed
+        // cycles/bit= (8MHz/31250) = 256
+        // Seed = 256 - (cycles/bit *1/2) = 128
+        TCNT0 = INIT_TIM0_SEED;
+        // Start Timer0 with prescaler
+        TCCR0A |= 1<<WGM01;
+        TCCR0B |= 1<<CS00;
+        OCR0A = 0; //set to full register compare.
+        // Enable Timer0 overflow interrupt
+        TIMSK |= 1 << OCIE0A;
+        // plant USI counter seed
+        // top value 16
+        // USI Seed = top vale - (start + data bits)
+        // USI Seed = 16 - (1+8) = 7
+        USISR |= 7;
+        // select 3 wire mode
+        USICR |= 1<<USIWM0;
+        // set USI Clock source to timer overflow
+        USICR |= 1<<USICS0;
+    }
 }
 
 //Timer Overflow Interrupt to load each bit into the USI Register
-ISR(TIM0_OVF_vect){
+ISR(TIM0_COMPA_vect){
     // Plant timer0 seed plus current timer value (1 bit duration)
     TCNT0 += TIM0_SEED;
 }
@@ -76,6 +80,7 @@ ISR(TIM0_OVF_vect){
 ISR(USI_OVF_vect){
     // read USIDR (data)
     serialInput = USIDR;
+    PORTB ^= PB5; // flip the led output bit every USI overflow.
     
     // Load data into buffer
     // Stop Timer0
